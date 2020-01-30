@@ -8,6 +8,13 @@
 #include <fstream>
 #include <limits>
 
+class material {
+    public:
+        virtual bool scatter(
+            const ray& r_in, const hit_record& rec, vec3& attenuation,
+            ray& scattered) const = 0;
+};
+
 vec3 random_in_unit_sphere() {
     vec3 p;
     do { // find random point in cube and continue until point within sphere
@@ -16,11 +23,52 @@ vec3 random_in_unit_sphere() {
     return p;
 }
 
-vec3 color(const ray& r, hittable *world) {
+class lambertian : public material {
+    public:
+        lambertian(const vec3& a) : albedo(a) {}
+        virtual bool scatter(const ray& r_in, const hit_record& rec,
+                             vec3& attenuation, ray& scattered) const {
+            vec3 target = rec.p + rec.normal + random_in_unit_sphere();
+            scattered = ray(rec.p, target-rec.p);
+            attenuation = albedo;
+            return true;
+        }
+
+        vec3 albedo;
+};
+
+vec3 reflect(const vec3& v, const vec3& n) {
+    return v - 2*dot(v,n)*n;
+}
+
+class metal : public material {
+    public:
+        metal(const vec3& a, float f) : albedo(a) {
+            if (f < 1) fuzz = f; else fuzz = 1;
+        }
+
+        virtual bool scatter(const ray& r_in, const hit_record& rec,
+                             vec3& attenuation, ray& scattered) const {
+            vec3 reflected = reflect(unit_vector(r_in.direction()), rec.normal);
+            scattered = ray(rec.p, reflected + fuzz*random_in_unit_sphere());
+            attenuation = albedo;
+            return (dot(scattered.direction(), rec.normal) > 0);
+        }
+        vec3 albedo;
+        float fuzz;
+};
+
+vec3 color(const ray& r, hittable *world, int depth) {
     hit_record rec;
     if (world->hit(r, 0.001, std::numeric_limits<float>::max(), rec)) {  // is a hit
-        vec3 target = rec.p + rec.normal + random_in_unit_sphere();
-        return 0.5 * color(ray(rec.p, target - rec.p), world);
+        ray scattered;
+        vec3 attenuation;
+        if (depth < 50 && rec.mat_ptr->scatter(r, rec, attenuation, scattered)) {
+            return attenuation*color(scattered, world, depth+1);
+        }
+        else {
+            return vec3(0,0,0);
+        }
     }
     else {  // no hit, so render background
         vec3 unit_direction = unit_vector(r.direction());
@@ -31,9 +79,9 @@ vec3 color(const ray& r, hittable *world) {
 
 int main() {
     // determine size of image
-    int nx = 1000; // width
-    int ny = 500; // height
-    int ns = 100; // number of antialiasing samples
+    int nx = 200; // width
+    int ny = 100; // height
+    int ns = 100; // number of samples
 
     // open file and add header
     std::ofstream outfile;
@@ -41,10 +89,12 @@ int main() {
     outfile << "P3\n" << nx << " " << ny << "\n255\n";
 
     // generate world and place objects in it
-    hittable *list[2];
-    list[0] = new sphere(vec3(0,0,-1), 0.5);
-    list[1] = new sphere(vec3(0,-100.5,-1), 100);
-    hittable *world = new hittablelist(list,2);
+    hittable *list[4];
+    list[0] = new sphere(vec3(0,0,-1), 0.5, new lambertian(vec3(0.8, 0.3, 0.3)));
+    list[1] = new sphere(vec3(0,-100.5,-1), 100, new lambertian(vec3(0.8, 0.8, 0.0)));
+    list[2] = new sphere(vec3(1,0,-1), 0.5, new metal(vec3(0.8, 0.6, 0.2), 1.0));
+    list[3] = new sphere(vec3(-1,0,-1), 0.5, new metal(vec3(0.8, 0.8, 0.8), 0.3));
+    hittable *world = new hittablelist(list,4);
 
     // render image
     camera cam;
@@ -55,7 +105,7 @@ int main() {
                 float u = float(i + random_double()) / float(nx);
                 float v = float(j + random_double()) / float(ny);
                 ray r = cam.get_ray(u, v);
-                col += color(r, world);
+                col += color(r, world, 0);
             }
             col /= float(ns);
 
@@ -70,3 +120,4 @@ int main() {
         }
     }
 }
+
