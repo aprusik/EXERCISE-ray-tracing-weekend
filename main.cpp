@@ -8,11 +8,19 @@
 #include <fstream>
 #include <limits>
 
+vec3 random_in_unit_sphere() {
+    vec3 p;
+    do { // find random point in cube and continue until point within sphere
+        p = 2.0*vec3(random_double(), random_double(), random_double()) - vec3(1,1,1);
+    } while (p.squared_length() >= 1.0);
+    return p;
+}
+
 vec3 color(const ray& r, hittable *world) {
     hit_record rec;
-    if (world->hit(r, 0.0, std::numeric_limits<float>::max(), rec)) {  // is a hit
-        // calculate surface normal at hit location
-        return 0.5*vec3(rec.normal.x()+1, rec.normal.y()+1, rec.normal.z()+1);
+    if (world->hit(r, 0.001, std::numeric_limits<float>::max(), rec)) {  // is a hit
+        vec3 target = rec.p + rec.normal + random_in_unit_sphere();
+        return 0.5 * color(ray(rec.p, target - rec.p), world);
     }
     else {  // no hit, so render background
         vec3 unit_direction = unit_vector(r.direction());
@@ -50,6 +58,9 @@ int main() {
                 col += color(r, world);
             }
             col /= float(ns);
+
+            // gamma correction
+            col = vec3( sqrt(col[0]), sqrt(col[1]), sqrt(col[2]) );
 
             int ir = int(255.99*col[0]);
             int ig = int(255.99*col[1]);
