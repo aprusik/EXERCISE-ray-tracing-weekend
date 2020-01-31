@@ -144,8 +144,8 @@ vec3 color(const ray& r, hittable *world, int depth) {
 
 int main() {
     // determine size of image
-    int nx = 1000; // width
-    int ny = 500; // height
+    int nx = 200; // width
+    int ny = 100; // height
     int ns = 100; // number of samples
 
     // open file and add header
@@ -163,8 +163,16 @@ int main() {
     list[4] = new sphere(vec3(-1,0,-1), -0.45, new dielectric(1.5));
     hittable *world = new hittablelist(list,5);
 
+    // define camera
+    vec3 lookfrom(3,3,2);
+    vec3 lookat(0,0,-1);
+    float dist_to_focus = (lookfrom-lookat).length();
+    float aperture = 2.0;
+
+    camera cam(lookfrom, lookat, vec3(0,1,0), 20,
+               float(nx)/float(ny), aperture, dist_to_focus);
+
     // render image
-    camera cam(vec3(-2,2,1), vec3(0,0,-1), vec3(0,1,0), 20, float(nx)/float(ny));
     for (int j = ny-1; j >= 0; j--) {   // for each pixel column in image
         for (int i = 0; i < nx; i++) {  // for each pixel in column
             vec3 col(0, 0, 0);
