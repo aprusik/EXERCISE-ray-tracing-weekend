@@ -144,8 +144,8 @@ vec3 color(const ray& r, hittable *world, int depth) {
 
 int main() {
     // determine size of image
-    int nx = 200; // width
-    int ny = 100; // height
+    int nx = 1000; // width
+    int ny = 500; // height
     int ns = 100; // number of samples
 
     // open file and add header
@@ -155,6 +155,7 @@ int main() {
 
     // generate world and place objects in it
     hittable *list[5];
+    float R = cos(M_PI/4);
     list[0] = new sphere(vec3(0,0,-1), 0.5, new lambertian(vec3(0.1, 0.2, 0.5)));
     list[1] = new sphere(vec3(0,-100.5,-1), 100, new lambertian(vec3(0.8, 0.8, 0.0)));
     list[2] = new sphere(vec3(1,0,-1), 0.5, new metal(vec3(0.8, 0.6, 0.2), 0.3));
@@ -163,7 +164,7 @@ int main() {
     hittable *world = new hittablelist(list,5);
 
     // render image
-    camera cam;
+    camera cam(vec3(-2,2,1), vec3(0,0,-1), vec3(0,1,0), 20, float(nx)/float(ny));
     for (int j = ny-1; j >= 0; j--) {   // for each pixel column in image
         for (int i = 0; i < nx; i++) {  // for each pixel in column
             vec3 col(0, 0, 0);
