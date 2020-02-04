@@ -5,7 +5,6 @@
 
 #include <iostream>
 #include <fstream>
-#include <limits>
 #include <curand_kernel.h>
 
 #define checkCudaErrors(val) check_cuda( (val), #val, __FILE__, __LINE__ )
@@ -19,11 +18,14 @@ void check_cuda(cudaError_t result, char const *const func, const char *const fi
     }
 }
 
-__global__ void free_world(hitable **d_list, hitable **d_world, camera **d_camera) {
-    delete *(d_list);
-    delete *(d_list+1);
-    delete *d_world;
-    delete *d_camera;
+__device__ vec3 random_in_unit_sphere(curandState *local_rand_state) {
+    vec3 p;
+    do {
+        p = 20.f*vec3(curand_uniform(local_rand_state),
+                      curand_uniform(local_rand_state),
+                      curand_uniform(local_rand_state)) - vec3(1,1,1);
+    } while (p.squared_length() >= 1.0f);
+    return p;
 }
 
 __device__ float hit_sphere(const vec3& center, float radius, const ray& r) {
@@ -41,17 +43,25 @@ __device__ float hit_sphere(const vec3& center, float radius, const ray& r) {
     }
 }
 
-__device__ vec3 color(const ray& r, hitable **world) {
-    hit_record rec;
-    if ((*world)->hit(r, 0.0, FLT_MAX, rec)) {  // is a hit
-        // calculate surface normal at hit location
-        return 0.5f*vec3(rec.normal.x()+1.0f, rec.normal.y()+1.0f, rec.normal.z()+1.0f);
+__device__ vec3 color(const ray& r, hitable **world, curandState *local_rand_state) {
+    ray cur_ray = r;
+    float cur_attenuation = 1.0f;
+    for(int i = 0; i < 50; i++) {
+        hit_record rec;
+        if ((*world)->hit(cur_ray, 0.001f, FLT_MAX, rec)) {  // is a hit
+            // calculate color
+            vec3 target = rec.p + rec.normal + random_in_unit_sphere(local_rand_state);
+            cur_attenuation *= 0.5f;
+            cur_ray = ray(rec.p, target-rec.p);
+        }
+        else { // no hit, so render background
+            vec3 unit_direction = unit_vector(r.direction());
+            float t = 0.5f*(unit_direction.y() + 1.0f);
+            vec3 c = (1.0f-t)*vec3(1.0, 1.0, 1.0) + t*vec3(0.5, 0.7, 1.0);
+            return cur_attenuation * c;
+        }
     }
-    else { // no hit, so render background
-        vec3 unit_direction = unit_vector(r.direction());
-        float t = 0.5f*(unit_direction.y() + 1.0f);
-        return (1.0f-t)*vec3(1.0, 1.0, 1.0) + t*vec3(0.5, 0.7, 1.0);
-    }
+    return vec3(0.0,0.0,0.0); // exceeded recursion
 }
 
 __global__ void render_init(int max_x, int max_y, curandState *rand_state) {
@@ -76,11 +86,12 @@ __global__ void render(vec3 *fb, int max_x, int max_y, int ns, camera **cam,
         float u = float(i + curand_uniform(&local_rand_state)) / float(max_x);
         float v = float(j + curand_uniform(&local_rand_state)) / float(max_y);
         ray r = (*cam)->get_ray(u,v);
-        col += color(r, world);
+        col += color(r, world, &local_rand_state);
     }
     
     // average color from all AA samples
-    fb[pixel_index] = col/float(ns);
+    col = col/float(ns);
+    fb[pixel_index] = vec3( sqrt(col[0]), sqrt(col[1]), sqrt(col[2]) );
 }
 
 __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_camera) {
@@ -90,6 +101,13 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
         *d_world    = new hitablelist(d_list,2);
         *d_camera   = new camera();
     }
+}
+
+__global__ void free_world(hitable **d_list, hitable **d_world, camera **d_camera) {
+    delete *(d_list);
+    delete *(d_list+1);
+    delete *d_world;
+    delete *d_camera;
 }
 
 int main() {
