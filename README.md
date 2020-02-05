@@ -13,7 +13,7 @@ same principles.
 
 ## CPU Version (single-threaded)
 ### Image
-* Render Time: 351 seconds
+* Render Time: ~351 seconds
 * Resolution: 1200x800
 * Number of Random Samples per pixel: 10
 
