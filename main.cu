@@ -76,7 +76,7 @@ __global__ void render(vec3 *fb, int max_x, int max_y, int ns, camera **cam,
     fb[pixel_index] = vec3( sqrt(col[0]), sqrt(col[1]), sqrt(col[2]) );
 }
 
-__global__ void create_world(hitable **d_list, hitable **d_world, camera **d_camera) {
+__global__ void create_world(hitable **d_list, hitable **d_world, camera **d_camera, int nx, int ny) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
         d_list[0] = new sphere(vec3(0,0,-1), 0.5, new lambertian(vec3(0.1, 0.2, 0.5)));
         d_list[1] = new sphere(vec3(0,-100.5,-1), 100, new lambertian(vec3(0.8, 0.8, 0.0)));
@@ -84,7 +84,7 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
         d_list[3] = new sphere(vec3(-1,0,-1), 0.5, new dielectric(1.5));
         d_list[4] = new sphere(vec3(-1,0,-1), -0.45, new dielectric(1.5));
         *d_world  = new hitablelist(d_list,5);
-        *d_camera = new camera();
+        *d_camera = new camera(vec3(-2,2,1), vec3(0,0,-1), vec3(0,1,0), 20, float(nx)/float(ny));
     }
 }
 
@@ -101,7 +101,7 @@ int main() {
     // determine size of image
     int nx = 1200; // width
     int ny = 600; // height
-    int ns = 1000; // number of AA samples per pixel
+    int ns = 100; // number of AA samples per pixel
 
     int tx = 16;
     int ty = 16;
@@ -128,7 +128,7 @@ int main() {
     checkCudaErrors(cudaMalloc((void **)&d_world, sizeof(hitable *)));
     camera **d_camera;
     checkCudaErrors(cudaMalloc((void **)&d_camera, sizeof(camera *)));
-    create_world<<<1,1>>>(d_list,d_world,d_camera);
+    create_world<<<1,1>>>(d_list,d_world,d_camera,nx,ny);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
