@@ -2,10 +2,10 @@
 #include "hitablelist.h"
 #include "sphere.h"
 #include "camera.h"
+#include "material.h"
 
 #include <iostream>
 #include <fstream>
-#include <curand_kernel.h>
 
 #define checkCudaErrors(val) check_cuda( (val), #val, __FILE__, __LINE__ )
 void check_cuda(cudaError_t result, char const *const func, const char *const file, int const line) {
@@ -18,44 +18,25 @@ void check_cuda(cudaError_t result, char const *const func, const char *const fi
     }
 }
 
-__device__ vec3 random_in_unit_sphere(curandState *local_rand_state) {
-    vec3 p;
-    do {
-        p = 20.f*vec3(curand_uniform(local_rand_state),
-                      curand_uniform(local_rand_state),
-                      curand_uniform(local_rand_state)) - vec3(1,1,1);
-    } while (p.squared_length() >= 1.0f);
-    return p;
-}
-
-__device__ float hit_sphere(const vec3& center, float radius, const ray& r) {
-    vec3 oc = r.origin() - center;
-    float a = dot(r.direction(), r.direction());
-    float b = 2.0f * dot(oc, r.direction());
-    float c = dot(oc, oc) - radius*radius;
-    float discriminant = b*b -4*a*c;
-    
-    if (discriminant < 0) { // no hit
-        return -1.0;
-    }
-    else {                  // hit
-        return (-b - sqrt(discriminant) ) / (2.0f*a);
-    }
-}
-
 __device__ vec3 color(const ray& r, hitable **world, curandState *local_rand_state) {
     ray cur_ray = r;
-    float cur_attenuation = 1.0f;
+    vec3 cur_attenuation = vec3(1.0,1.0,1.0);
     for(int i = 0; i < 50; i++) {
         hit_record rec;
         if ((*world)->hit(cur_ray, 0.001f, FLT_MAX, rec)) {  // is a hit
+            ray scattered;
+            vec3 attenuation;
             // calculate color
-            vec3 target = rec.p + rec.normal + random_in_unit_sphere(local_rand_state);
-            cur_attenuation *= 0.5f;
-            cur_ray = ray(rec.p, target-rec.p);
+            if (rec.mat_ptr->scatter(cur_ray, rec, attenuation, scattered, local_rand_state)) {
+                cur_attenuation *= attenuation;
+                cur_ray = scattered;
+            }
+            else {
+                return vec3(0.0,0.0,0.0);
+            }
         }
         else { // no hit, so render background
-            vec3 unit_direction = unit_vector(r.direction());
+            vec3 unit_direction = unit_vector(cur_ray.direction());
             float t = 0.5f*(unit_direction.y() + 1.0f);
             vec3 c = (1.0f-t)*vec3(1.0, 1.0, 1.0) + t*vec3(0.5, 0.7, 1.0);
             return cur_attenuation * c;
@@ -88,6 +69,7 @@ __global__ void render(vec3 *fb, int max_x, int max_y, int ns, camera **cam,
         ray r = (*cam)->get_ray(u,v);
         col += color(r, world, &local_rand_state);
     }
+    rand_state[pixel_index] = local_rand_state;
     
     // average color from all AA samples
     col = col/float(ns);
@@ -96,16 +78,20 @@ __global__ void render(vec3 *fb, int max_x, int max_y, int ns, camera **cam,
 
 __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_camera) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
-        *(d_list)   = new sphere(vec3(0,0,-1), 0.5);
-        *(d_list+1) = new sphere(vec3(0,-100.5,-1), 100);
-        *d_world    = new hitablelist(d_list,2);
-        *d_camera   = new camera();
+        d_list[0] = new sphere(vec3(0,0,-1), 0.5, new lambertian(vec3(0.8, 0.3, 0.3)));
+        d_list[1] = new sphere(vec3(0,-100.5,-1), 100, new lambertian(vec3(0.8, 0.8, 0.0)));
+        d_list[2] = new sphere(vec3(1,0,-1), 0.5, new metal(vec3(0.8, 0.6, 0.2), 1.0));
+        d_list[3] = new sphere(vec3(-1,0,-1), 0.5, new metal(vec3(0.8, 0.8, 0.8), 0.3));
+        *d_world  = new hitablelist(d_list,4);
+        *d_camera = new camera();
     }
 }
 
 __global__ void free_world(hitable **d_list, hitable **d_world, camera **d_camera) {
-    delete *(d_list);
-    delete *(d_list+1);
+    for (int i=0; i < 4; i++) {
+        delete ((sphere *)d_list[i])->mat_ptr;
+        delete d_list[i];
+    }
     delete *d_world;
     delete *d_camera;
 }
@@ -136,7 +122,7 @@ int main() {
 
     // allocate and create world on GPU
     hitable **d_list;
-    checkCudaErrors(cudaMalloc((void **)&d_list, 2*sizeof(hitable *)));
+    checkCudaErrors(cudaMalloc((void **)&d_list, 4*sizeof(hitable *)));
     hitable **d_world;
     checkCudaErrors(cudaMalloc((void **)&d_world, sizeof(hitable *)));
     camera **d_camera;
@@ -175,8 +161,10 @@ int main() {
     checkCudaErrors(cudaDeviceSynchronize());
     free_world<<<1,1>>>(d_list,d_world,d_camera);
     checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaFree(d_list));
+    checkCudaErrors(cudaFree(d_camera));
     checkCudaErrors(cudaFree(d_world));
+    checkCudaErrors(cudaFree(d_list));
+    checkCudaErrors(cudaFree(d_rand_state));
     checkCudaErrors(cudaFree(fb));
 
     // useful for cuda-memcheck --leak-check full
